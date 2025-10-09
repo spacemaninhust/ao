@@ -342,8 +342,6 @@ def _reference_quantized_conv2d(
     x_i8 = torch.ops.aten.clamp(x_i8, x_quant_min, x_quant_max)
     weight_i8 = torch.ops.aten.clamp(weight_i8, weight_quant_min, weight_quant_max)
 
-    x_i16 = x_i8.to(torch.int16)
-    weight_i16 = weight_i8.to(torch.int16)
     # always set bias to None so that the same representation can work for the case
     # no matter if bias_scale == x_scale * weight_scale or not
     acc_i32 = torch.ops.aten.conv2d.default(
@@ -369,19 +367,7 @@ def _reference_quantized_conv2d(
     #     groups,
     # )
     acc_i32 = acc_i32.to(torch.int32)
-    # acc_i32 = out_dtype(
-    #     torch.ops.aten.conv2d.default,
-    #     torch.int32,
-    #     x_i16 - x_zero_point,
-    #     weight_i16 - weight_zero_point,
-    #     None,
-    #     stride,
-    #     padding,
-    #     dilation,
-    #     # transposed,
-    #     # output_padding,
-    #     groups,
-    # )
+
     # Note: we are quantizing bias with these scales without signal from user, but it might be OK
     bias_scale = x_scale * weight_scale
     # bias quantization to int32 uses bias_scale = x_scale * weight_scale due to:
@@ -397,7 +383,6 @@ def _reference_quantized_conv2d(
     # Note we had to multiply bias_fp32 qith X_scale * W_scale = bias_scale
     # Thus bias quantization to int32 must be with X_scale * W_scale
 
-    # bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
     bias_i32 = torch.ops.aten.div.Tensor(bias_fp32, bias_scale).to(torch.int32)
     # Unsqueeze to match broadcast dims
     # Unfortnuately I cannot do bias_i32.unsqueeze(0) due to literal matching nightmare
@@ -415,8 +400,7 @@ def _reference_quantized_conv2d(
     #     )
     #     + out_zero_point
     # )
-    acc_i32 = torch.ops.aten.mul.Tensor(acc_i32, x_scale * weight_scale / out_scale) + out_zero_point
-    acc_i32 = acc_i32.to(torch.int32)
+    acc_i32 = (torch.ops.aten.mul.Tensor(acc_i32.to(torch.float32), x_scale * weight_scale / out_scale)).to(torch.int32) + out_zero_point
     out_i8 = torch.ops.aten.clamp(acc_i32, out_quant_min, out_quant_max).to(torch.int8)
     return out_i8
 
